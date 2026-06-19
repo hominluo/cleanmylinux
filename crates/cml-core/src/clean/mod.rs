@@ -5,7 +5,7 @@
 //! deletion is re-checked against the [`Safelist`] right before it happens.
 
 use crate::fsutil::dir_size;
-use crate::helper_ipc::{HelperRequest, HelperResponse};
+use crate::helper_ipc::{HelperOp, HelperRequest, HelperResponse};
 use crate::progress::{report, CancelToken, Progress};
 use crate::safety::Safelist;
 use crate::types::{CleanReport, DeleteMode, ScanItem};
@@ -104,6 +104,36 @@ fn remove_dir_contents(dir: &Path) -> std::io::Result<()> {
 
 fn is_priv_marker(path: &Path) -> bool {
     path.to_string_lossy().starts_with("priv://")
+}
+
+/// One-shot cleanup used by both frontends: deletes selected user-space items
+/// and dispatches selected privileged (`priv://`) items to the helper. Returns
+/// the combined report plus a human summary of the privileged results.
+pub fn clean_selected(
+    items: &[ScanItem],
+    safelist: &Safelist,
+    cancel: &CancelToken,
+    progress: Option<&mut Progress<'_>>,
+) -> (CleanReport, String) {
+    // User-space deletions.
+    let mut report = clean_items(items, safelist, cancel, progress);
+
+    // Privileged deletions (selected priv:// rows).
+    let mut priv_notes = Vec::new();
+    for item in items.iter().filter(|i| i.selected) {
+        let marker = item.path.to_string_lossy();
+        if let Some(op) = HelperOp::from_marker(&marker) {
+            match run_privileged(&HelperRequest::new(op)) {
+                Ok(resp) => {
+                    report.freed_bytes += resp.freed_bytes;
+                    priv_notes.push(resp.message);
+                }
+                Err(e) => priv_notes.push(format!("{}: {e}", item.label)),
+            }
+        }
+    }
+
+    (report, priv_notes.join("; "))
 }
 
 /// Path to the installed privileged helper.

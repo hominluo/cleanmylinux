@@ -7,7 +7,7 @@ members = [
     "crates/cml-core",
     "crates/cml-helper",
     "crates/cml-gtk",
-    # "crates/cml-qt",  # KDE frontend — enabled once Qt6/Kirigami dev deps are installed
+    "crates/cml-qt",
 ]
 
 [workspace.package]

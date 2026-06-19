@@ -92,7 +92,16 @@ cargo deb -p cml-qt       # cleanmylinux-kde_*.deb
 
 ## Status
 
-🚧 Early development. See [the implementation plan](#) for the roadmap. Contributions welcome.
+Working v0.1 — both frontends run and share the `cml-core` engine:
+
+- ✅ Engine (`cml-core`) with all scanners + safety layer (17 unit tests)
+- ✅ GNOME frontend (`cleanmylinux`) — GTK4 + libadwaita
+- ✅ KDE frontend (`cleanmylinux-qt`) — Qt6/QML + Kirigami via cxx-qt
+- ✅ Privileged helper + polkit policy
+- ✅ `.deb` packaging (`cleanmylinux-common`, `-gnome`, `-kde`)
+
+Roadmap: grouped/sectioned result lists, exclusions & settings UI, scheduled
+cleanup, i18n, CI, and visual polish per desktop. Contributions welcome.
 
 ## License
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=CleanMyLinux
+GenericName=System Cleanup
+Comment=Reclaim disk space and keep your system clean
+Exec=cleanmylinux-qt
+Icon=io.cleanmylinux.CleanMyLinux
+Terminal=false
+Type=Application
+Categories=System;Utility;Qt;KDE;
+Keywords=clean;cache;junk;disk;space;cleanup;uninstall;
+StartupNotify=true

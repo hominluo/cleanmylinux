@@ -4,7 +4,6 @@
 
 use adw::prelude::*;
 use cml_core::clean;
-use cml_core::helper_ipc::{HelperOp, HelperRequest};
 use cml_core::progress::CancelToken;
 use cml_core::scan::monitor::Monitor;
 use cml_core::types::{Module, ScanResult};
@@ -417,8 +416,7 @@ impl App {
     }
 }
 
-/// Run user-space + privileged cleanup; return the user-space report plus a
-/// human summary of privileged results.
+/// Run user-space + privileged cleanup via the shared engine helper.
 fn run_clean(
     items: Vec<cml_core::types::ScanItem>,
     cancel: &CancelToken,
@@ -426,30 +424,7 @@ fn run_clean(
     let home = dirs::home_dir().unwrap_or_default();
     let cfg = cml_core::config::Config::load();
     let safelist = cml_core::safety::Safelist::new(home, cfg.exclusions);
-
-    // User-space deletions.
-    let report = clean::clean_items(&items, &safelist, cancel, None);
-
-    // Privileged deletions (selected priv:// rows).
-    let mut priv_freed = 0u64;
-    let mut priv_notes = Vec::new();
-    for item in items.iter().filter(|i| i.selected) {
-        let p = item.path.to_string_lossy();
-        if let Some(op) = HelperOp::from_marker(&p) {
-            match clean::run_privileged(&HelperRequest::new(op)) {
-                Ok(resp) => {
-                    priv_freed += resp.freed_bytes;
-                    priv_notes.push(resp.message);
-                }
-                Err(e) => priv_notes.push(format!("{}: {e}", item.label)),
-            }
-        }
-    }
-
-    let mut report = report;
-    report.freed_bytes += priv_freed;
-    let extra = priv_notes.join("; ");
-    (report, extra)
+    clean::clean_selected(&items, &safelist, cancel, None)
 }
 
 fn module_subtitle(m: Module) -> String {

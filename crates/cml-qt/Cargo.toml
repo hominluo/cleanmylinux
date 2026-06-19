@@ -1,0 +1,36 @@
+[package]
+name = "cml-qt"
+description = "CleanMyLinux — KDE frontend (Qt6/QML + Kirigami via cxx-qt)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cleanmylinux-qt"
+path = "src/main.rs"
+
+[dependencies]
+cml-core = { path = "../cml-core" }
+cxx = "1"
+cxx-qt = "0.7"
+cxx-qt-lib = { version = "0.7", features = ["qt_full"] }
+dirs.workspace = true
+humansize.workspace = true
+
+[build-dependencies]
+cxx-qt-build = { version = "0.7", features = ["link_qt_object_files"] }
+
+[package.metadata.deb]
+name = "cleanmylinux-kde"
+depends = "cleanmylinux-common (>= 0.1.0), libqt6core6, libqt6gui6, libqt6quick6, qml6-module-org-kde-kirigami"
+section = "utils"
+priority = "optional"
+extended-description = "KDE/Kirigami frontend for CleanMyLinux."
+assets = [
+    ["target/release/cleanmylinux-qt", "usr/bin/cleanmylinux-qt", "755"],
+    ["../../data/kde/io.cleanmylinux.CleanMyLinux.Qt.desktop", "usr/share/applications/", "644"],
+    ["../../data/icons/hicolor/scalable/apps/io.cleanmylinux.CleanMyLinux.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
