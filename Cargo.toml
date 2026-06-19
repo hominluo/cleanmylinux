@@ -1,0 +1,42 @@
+# CleanMyLinux — Cargo workspace
+# Shared engine (cml-core) + privileged helper (cml-helper) + two native frontends
+# (cml-gtk for GNOME, cml-qt for KDE). See README.md for the architecture overview.
+[workspace]
+resolver = "2"
+members = [
+    "crates/cml-core",
+    "crates/cml-helper",
+    "crates/cml-gtk",
+    # "crates/cml-qt",  # KDE frontend — enabled once Qt6/Kirigami dev deps are installed
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "GPL-3.0-or-later"
+authors = ["CleanMyLinux contributors"]
+repository = "https://github.com/cleanmylinux/desktop-client"
+homepage = "https://github.com/cleanmylinux/desktop-client"
+
+[workspace.dependencies]
+# shared engine deps
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jwalk = "0.8"
+rayon = "1"
+sysinfo = "0.32"
+humansize = "2"
+dirs = "5"
+trash = "5"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
+
+# release profile: small, fast binaries for distribution
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+*.pdb
+Cargo.lock.orig
+
+# cargo-deb output
+/target/debian
+
+# editor / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store

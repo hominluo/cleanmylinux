@@ -1,0 +1,36 @@
+[package]
+name = "cml-gtk"
+description = "CleanMyLinux — GNOME frontend (GTK4 + libadwaita)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cleanmylinux"
+path = "src/main.rs"
+
+[dependencies]
+cml-core = { path = "../cml-core" }
+relm4 = { version = "0.9", features = ["libadwaita"] }
+relm4-components = "0.9"
+gtk = { version = "0.9", package = "gtk4" }
+adw = { version = "0.7", package = "libadwaita", features = ["v1_5"] }
+humansize.workspace = true
+dirs.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[package.metadata.deb]
+name = "cleanmylinux-gnome"
+maintainer-scripts = "../../packaging/gnome"
+depends = "cleanmylinux-common (>= 0.1.0), libgtk-4-1, libadwaita-1-0"
+assets = [
+    ["target/release/cleanmylinux", "usr/bin/cleanmylinux", "755"],
+    ["../../data/gnome/io.cleanmylinux.CleanMyLinux.desktop", "usr/share/applications/", "644"],
+    ["../../data/gnome/style.css", "usr/share/cleanmylinux/style.css", "644"],
+    ["../../data/icons/hicolor/scalable/apps/io.cleanmylinux.CleanMyLinux.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../data/shared/io.cleanmylinux.CleanMyLinux.metainfo.xml", "usr/share/metainfo/", "644"],
+]

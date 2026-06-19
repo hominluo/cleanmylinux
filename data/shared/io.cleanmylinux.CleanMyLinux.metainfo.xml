@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.cleanmylinux.CleanMyLinux</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>CleanMyLinux</name>
+  <summary>Reclaim disk space and keep your system clean</summary>
+
+  <description>
+    <p>
+      CleanMyLinux is a native system-cleanup app inspired by CleanMyMac. A single
+      Smart Scan finds reclaimable space across caches, package leftovers, large
+      files and more, and cleans it with one click — safely.
+    </p>
+    <ul>
+      <li>Smart Scan dashboard with a reclaimable-space gauge</li>
+      <li>System junk: caches, thumbnails, Trash, browser caches</li>
+      <li>Package cleanup: APT cache, orphans, old kernels, journal, snap, flatpak</li>
+      <li>Large &amp; old file finder (recoverable via Trash)</li>
+      <li>App uninstaller and a live system monitor</li>
+    </ul>
+    <p>No telemetry. Nothing is deleted without your confirmation.</p>
+  </description>
+
+  <launchable type="desktop-id">io.cleanmylinux.CleanMyLinux.desktop</launchable>
+  <categories>
+    <category>System</category>
+    <category>Utility</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-06-19">
+      <description>
+        <p>Initial release: Smart Scan, System Junk, Package Cleanup, Large &amp; Old Files, Uninstaller and System Monitor.</p>
+      </description>
+    </release>
+  </releases>
+</component>

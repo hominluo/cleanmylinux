@@ -1,0 +1,17 @@
+/* CleanMyLinux — GNOME styling. Loaded on top of the Adwaita stylesheet. */
+
+.pill {
+    padding: 8px 24px;
+    border-radius: 999px;
+    font-weight: bold;
+}
+
+list.boxed-list row {
+    padding: 4px;
+}
+
+/* Sidebar spacing to feel closer to the CleanMyMac module list. */
+.navigation-sidebar row {
+    margin: 2px 6px;
+    border-radius: 10px;
+}

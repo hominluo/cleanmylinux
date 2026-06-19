@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3584e4"/>
+      <stop offset="1" stop-color="#1c71d8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <!-- broom handle -->
+  <rect x="78" y="28" width="8" height="44" rx="4" transform="rotate(35 82 50)" fill="#ffffff"/>
+  <!-- broom head -->
+  <path d="M44 78 L72 64 L86 86 Q72 100 50 98 Z" fill="#ffffff"/>
+  <path d="M50 98 L52 110 M60 96 L63 108 M70 92 L74 104 M80 86 L85 97"
+        stroke="#ffffff" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.85"/>
+  <!-- sparkle -->
+  <path d="M40 36 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3 z" fill="#ffffff" opacity="0.95"/>
+</svg>
