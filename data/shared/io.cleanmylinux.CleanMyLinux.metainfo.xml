@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.cleanmylinux.CleanMyLinux</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-or-later</project_license>
+  <project_license>MIT</project_license>
 
   <name>CleanMyLinux</name>
   <summary>Reclaim disk space and keep your system clean</summary>

@@ -6,7 +6,7 @@
 
 Smart Scan · System Junk · Package Cleanup · Large & Old Files · App Uninstaller · System Monitor
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange)
 ![GTK4](https://img.shields.io/badge/GNOME-GTK4%20%2B%20libadwaita-4A86CF)
 ![Kirigami](https://img.shields.io/badge/KDE-Qt6%20%2B%20Kirigami-1D99F3)
@@ -105,4 +105,4 @@ cleanup, i18n, CI, and visual polish per desktop. Contributions welcome.
 
 ## License
 
-[GPL-3.0-or-later](LICENSE) © CleanMyLinux contributors
+[MIT](LICENSE) © Homin Luo

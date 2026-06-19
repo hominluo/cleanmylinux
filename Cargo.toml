@@ -14,9 +14,9 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-license = "GPL-3.0-or-later"
+license = "MIT"
 authors = ["CleanMyLinux contributors"]
-repository = "https://github.com/cleanmylinux/desktop-client"
+repository = "https://github.com/hominluo/cleanmylinux"
 homepage = "https://github.com/cleanmylinux/desktop-client"
 
 [workspace.dependencies]
