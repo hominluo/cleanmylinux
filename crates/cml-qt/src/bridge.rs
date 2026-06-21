@@ -262,13 +262,15 @@ impl qobject::Controller {
             selected as f64 / total as f64
         };
         let summary = humansize::format_size(selected, humansize::DECIMAL);
-        let rows = rows_json(&items);
         drop(items);
 
+        // Deliberately do *not* rewrite `rows_json` here: the CheckBox already
+        // reflects the user's toggle, and regenerating the JSON would rebuild the
+        // whole Repeater on every click (flicker, lost focus). Only the derived
+        // gauge/summary state needs to change.
         this.as_mut().set_gauge_value(frac);
         this.as_mut()
             .set_summary(QString::from(&format!("{summary} selected")));
-        this.as_mut().set_rows_json(QString::from(&rows));
         this.as_mut().set_has_selection(selected > 0);
     }
 
