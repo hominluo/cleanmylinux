@@ -7,5 +7,5 @@ Icon=io.cleanmylinux.CleanMyLinux
 Terminal=false
 Type=Application
 Categories=System;Utility;Qt;KDE;
-Keywords=clean;cache;junk;disk;space;cleanup;uninstall;
+Keywords=clean;cache;junk;disk;space;cleanup;
 StartupNotify=true

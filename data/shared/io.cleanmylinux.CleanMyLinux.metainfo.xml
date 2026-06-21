@@ -18,7 +18,7 @@
       <li>System junk: caches, thumbnails, Trash, browser caches</li>
       <li>Package cleanup: APT cache, orphans, old kernels, journal, snap, flatpak</li>
       <li>Large &amp; old file finder (recoverable via Trash)</li>
-      <li>App uninstaller and a live system monitor</li>
+      <li>Live system monitor</li>
     </ul>
     <p>No telemetry. Nothing is deleted without your confirmation.</p>
   </description>
@@ -34,7 +34,7 @@
   <releases>
     <release version="0.1.0" date="2026-06-19">
       <description>
-        <p>Initial release: Smart Scan, System Junk, Package Cleanup, Large &amp; Old Files, Uninstaller and System Monitor.</p>
+        <p>Initial release: Smart Scan, System Junk, Package Cleanup, Large &amp; Old Files and System Monitor.</p>
       </description>
     </release>
   </releases>
