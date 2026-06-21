@@ -6,7 +6,7 @@ use adw::prelude::*;
 use cml_core::clean;
 use cml_core::progress::CancelToken;
 use cml_core::scan::monitor::Monitor;
-use cml_core::types::{Module, ScanResult};
+use cml_core::types::{DeleteMode, Module, Safety, ScanItem, ScanResult};
 use cml_core::Engine;
 use relm4::factory::{DynamicIndex, FactoryVecDeque};
 use relm4::prelude::*;
@@ -42,6 +42,7 @@ pub enum Msg {
     Scan,
     RowToggled(DynamicIndex, bool),
     SelectAll(bool),
+    ConfirmClean,
     Clean,
     Cancel,
     Tick,
@@ -95,7 +96,6 @@ impl Component for App {
                                     append = &row_button(Module::SystemJunk.title(), Module::SystemJunk.icon_name()),
                                     append = &row_button(Module::PackageCleanup.title(), Module::PackageCleanup.icon_name()),
                                     append = &row_button(Module::LargeAndOldFiles.title(), Module::LargeAndOldFiles.icon_name()),
-                                    append = &row_button(Module::Uninstaller.title(), Module::Uninstaller.icon_name()),
                                     append = &row_button(Module::SystemMonitor.title(), Module::SystemMonitor.icon_name()),
 
                                     connect_row_activated[sender] => move |_, row| {
@@ -105,7 +105,6 @@ impl Component for App {
                                             1 => View::Module(Module::SystemJunk),
                                             2 => View::Module(Module::PackageCleanup),
                                             3 => View::Module(Module::LargeAndOldFiles),
-                                            4 => View::Module(Module::Uninstaller),
                                             _ => View::Module(Module::SystemMonitor),
                                         };
                                         sender.input(Msg::Select(view));
@@ -170,7 +169,7 @@ impl Component for App {
                                                 add_css_class: "pill",
                                                 #[watch]
                                                 set_sensitive: !model.busy && model.result.selected_size() > 0,
-                                                connect_clicked => Msg::Clean,
+                                                connect_clicked => Msg::ConfirmClean,
                                             },
                                             gtk::Button {
                                                 set_label: "Cancel",
@@ -285,12 +284,15 @@ impl Component for App {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
         match msg {
             Msg::Select(view) => {
                 self.view = view;
                 let (title, subtitle) = match view {
-                    View::SmartScan => ("Smart Scan".to_string(), "Reclaim space with one click".into()),
+                    View::SmartScan => (
+                        "Smart Scan".to_string(),
+                        "Reclaim space with one click".into(),
+                    ),
                     View::Module(m) => (m.title().to_string(), module_subtitle(m)),
                 };
                 self.title = title;
@@ -342,6 +344,12 @@ impl Component for App {
                 self.cancel.cancel();
                 self.status = "Cancelling…".into();
             }
+            Msg::ConfirmClean => {
+                if self.busy || self.result.selected_size() == 0 {
+                    return;
+                }
+                present_clean_dialog(root, &self.result.items, sender.input_sender().clone());
+            }
             Msg::Clean => {
                 if self.busy {
                     return;
@@ -349,13 +357,13 @@ impl Component for App {
                 self.busy = true;
                 self.status = "Cleaning…".into();
                 let items = self.result.items.clone();
-                let cancel = CancelToken::new();
+                self.cancel = CancelToken::new();
+                let cancel = self.cancel.clone();
                 sender.oneshot_command(async move {
-                    let (report, extra) = relm4::tokio::task::spawn_blocking(move || {
-                        run_clean(items, &cancel)
-                    })
-                    .await
-                    .unwrap_or_default();
+                    let (report, extra) =
+                        relm4::tokio::task::spawn_blocking(move || run_clean(items, &cancel))
+                            .await
+                            .unwrap_or_default();
                     CmdOut::CleanDone(report, extra)
                 });
             }
@@ -368,7 +376,12 @@ impl Component for App {
         }
     }
 
-    fn update_cmd(&mut self, msg: Self::CommandOutput, _sender: ComponentSender<Self>, _root: &Self::Root) {
+    fn update_cmd(
+        &mut self,
+        msg: Self::CommandOutput,
+        _sender: ComponentSender<Self>,
+        _root: &Self::Root,
+    ) {
         match msg {
             CmdOut::ScanDone(res) => {
                 self.busy = false;
@@ -462,6 +475,70 @@ fn format_monitor(s: &cml_core::scan::monitor::SystemSample) -> String {
         ));
     }
     out
+}
+
+fn present_clean_dialog(
+    root: &adw::ApplicationWindow,
+    items: &[ScanItem],
+    input: relm4::Sender<Msg>,
+) {
+    let selected: Vec<&ScanItem> = items.iter().filter(|i| i.selected).collect();
+    if selected.is_empty() {
+        return;
+    }
+
+    let selected_bytes: u64 = selected.iter().map(|i| i.size).sum();
+    let permanent = selected
+        .iter()
+        .filter(|i| i.delete_mode == DeleteMode::Permanent)
+        .count();
+    let trash = selected
+        .iter()
+        .filter(|i| i.delete_mode == DeleteMode::Trash)
+        .count();
+    let privileged = selected
+        .iter()
+        .filter(|i| i.path.to_string_lossy().starts_with("priv://"))
+        .count();
+    let risky = selected
+        .iter()
+        .filter(|i| i.safety == Safety::Risky)
+        .count();
+
+    let mut lines = vec![
+        format!(
+            "{} selected across {} item(s).",
+            humansize::format_size(selected_bytes, humansize::DECIMAL),
+            selected.len()
+        ),
+        format!("{permanent} item(s) will be deleted permanently."),
+    ];
+    if trash > 0 {
+        lines.push(format!("{trash} user file(s) will be moved to Trash."));
+    }
+    if privileged > 0 {
+        lines.push(format!(
+            "{privileged} privileged action(s) may ask for your password."
+        ));
+    }
+    if risky > 0 {
+        lines.push(format!("{risky} risky item(s) are selected."));
+    }
+
+    let dialog = adw::AlertDialog::builder()
+        .heading("Clean selected items?")
+        .body(lines.join("\n"))
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("clean", "Clean");
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    dialog.set_response_appearance("clean", adw::ResponseAppearance::Destructive);
+    dialog.choose(root, None::<&gtk::gio::Cancellable>, move |response| {
+        if response == "clean" {
+            input.send(Msg::Clean).ok();
+        }
+    });
 }
 
 /// Build a sidebar row (icon + label) as a plain box; the parent ListBox wraps

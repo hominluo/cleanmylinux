@@ -5,6 +5,7 @@ mod factory;
 mod gauge;
 
 use relm4::RelmApp;
+use std::path::Path;
 
 const APP_ID: &str = "io.cleanmylinux.CleanMyLinux";
 
@@ -18,8 +19,7 @@ list.boxed-list row { padding: 4px; }
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -29,8 +29,20 @@ fn main() {
 }
 
 fn load_css() {
+    install_css(INLINE_CSS);
+
+    let dev_css = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/gnome/style.css");
+    if let Ok(css) = std::fs::read_to_string(&dev_css) {
+        install_css(&css);
+    }
+    if let Ok(css) = std::fs::read_to_string("/usr/share/cleanmylinux/style.css") {
+        install_css(&css);
+    }
+}
+
+fn install_css(css: &str) {
     let provider = gtk::CssProvider::new();
-    provider.load_from_data(INLINE_CSS);
+    provider.load_from_data(css);
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
             &display,

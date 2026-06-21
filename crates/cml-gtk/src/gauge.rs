@@ -71,7 +71,6 @@ impl Gauge {
         drop(s);
         self.widget.queue_draw();
     }
-
 }
 
 impl Default for Gauge {
@@ -101,7 +100,12 @@ fn draw(s: &GaugeState, area: &gtk::DrawingArea, cr: &Context, w: i32, h: i32) {
 
     // Track (full ring).
     cr.set_line_width(line_w);
-    cr.set_source_rgba(track.red() as f64, track.green() as f64, track.blue() as f64, track.alpha() as f64);
+    cr.set_source_rgba(
+        track.red() as f64,
+        track.green() as f64,
+        track.blue() as f64,
+        track.alpha() as f64,
+    );
     cr.arc(cx, cy, radius, 0.0, 2.0 * PI);
     let _ = cr.stroke();
 
@@ -111,7 +115,12 @@ fn draw(s: &GaugeState, area: &gtk::DrawingArea, cr: &Context, w: i32, h: i32) {
     let end = start + frac * 2.0 * PI;
     cr.set_line_width(line_w);
     cr.set_line_cap(gtk::cairo::LineCap::Round);
-    cr.set_source_rgba(accent.red() as f64, accent.green() as f64, accent.blue() as f64, accent.alpha() as f64);
+    cr.set_source_rgba(
+        accent.red() as f64,
+        accent.green() as f64,
+        accent.blue() as f64,
+        accent.alpha() as f64,
+    );
     cr.arc(cx, cy, radius, start, end);
     let _ = cr.stroke();
 
@@ -120,9 +129,18 @@ fn draw(s: &GaugeState, area: &gtk::DrawingArea, cr: &Context, w: i32, h: i32) {
         .style_context()
         .lookup_color("window_fg_color")
         .unwrap_or_else(|| gtk::gdk::RGBA::new(0.1, 0.1, 0.1, 1.0));
-    cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, fg.alpha() as f64);
+    cr.set_source_rgba(
+        fg.red() as f64,
+        fg.green() as f64,
+        fg.blue() as f64,
+        fg.alpha() as f64,
+    );
 
-    cr.select_font_face("Cantarell", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Bold);
+    cr.select_font_face(
+        "Cantarell",
+        gtk::cairo::FontSlant::Normal,
+        gtk::cairo::FontWeight::Bold,
+    );
     cr.set_font_size(34.0);
     if let Ok(ext) = cr.text_extents(&s.value) {
         cr.move_to(cx - ext.width() / 2.0 - ext.x_bearing(), cy);
@@ -130,7 +148,11 @@ fn draw(s: &GaugeState, area: &gtk::DrawingArea, cr: &Context, w: i32, h: i32) {
     }
 
     cr.set_font_size(13.0);
-    cr.select_font_face("Cantarell", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Normal);
+    cr.select_font_face(
+        "Cantarell",
+        gtk::cairo::FontSlant::Normal,
+        gtk::cairo::FontWeight::Normal,
+    );
     if let Ok(ext) = cr.text_extents(&s.caption) {
         cr.move_to(cx - ext.width() / 2.0 - ext.x_bearing(), cy + 24.0);
         let _ = cr.show_text(&s.caption);
