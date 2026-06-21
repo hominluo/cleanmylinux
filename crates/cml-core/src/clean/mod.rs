@@ -58,7 +58,6 @@ pub fn clean_items(
         match delete_one(&item.path, item.delete_mode, safelist, cancel) {
             Ok(outcome) => {
                 report_out.freed_bytes += outcome.freed_bytes;
-                report_out.removed += 1;
                 if outcome.skipped_protected > 0 {
                     report_out.failures.push((
                         item.path.clone(),
@@ -67,6 +66,12 @@ pub fn clean_items(
                             outcome.skipped_protected
                         ),
                     ));
+                }
+                // Count as removed when something was actually freed, or the item
+                // was cleanly emptied. A fully-skipped item (nothing freed, only
+                // protected descendants left behind) is reported as a failure only.
+                if outcome.freed_bytes > 0 || outcome.skipped_protected == 0 {
+                    report_out.removed += 1;
                 }
             }
             Err(e) => report_out.failures.push((item.path.clone(), e.to_string())),
@@ -86,11 +91,12 @@ fn delete_one(
     if !path.exists() {
         return Ok(DeleteOutcome::default());
     }
-    // Measure before removing so we can report freed bytes.
-    let before = dir_size(path, cancel);
 
     match mode {
         DeleteMode::Trash => {
+            // Trashing moves the path away, so we can't measure afterwards —
+            // size it up front.
+            let before = dir_size(path, cancel);
             trash::delete(path)?;
             Ok(DeleteOutcome {
                 freed_bytes: before,
@@ -102,16 +108,12 @@ fn delete_one(
             if meta.is_dir() {
                 // Remove directory *contents* but keep the well-known dir itself
                 // (e.g. ~/.cache should continue to exist).
-                let skipped_protected = remove_dir_contents(path, safelist)?;
-                let after = dir_size(path, cancel);
-                Ok(DeleteOutcome {
-                    freed_bytes: before.saturating_sub(after),
-                    skipped_protected,
-                })
+                Ok(remove_dir_contents(path, safelist)?)
             } else {
+                let freed = meta.len();
                 std::fs::remove_file(path)?;
                 Ok(DeleteOutcome {
-                    freed_bytes: before,
+                    freed_bytes: freed,
                     skipped_protected: 0,
                 })
             }
@@ -119,21 +121,29 @@ fn delete_one(
     }
 }
 
-/// Remove everything inside `dir` but leave `dir` in place.
-fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<usize> {
-    let mut skipped_protected = 0;
+/// Remove everything inside `dir` but leave `dir` in place, tallying the bytes
+/// actually freed and the number of protected descendants left untouched.
+///
+/// Every entry is re-checked against the [`Safelist`], which requires it to live
+/// under `$HOME`. Callers must therefore only pass user-space directories; a
+/// `DeleteMode::Permanent` directory located outside `$HOME` would have all of
+/// its contents treated as protected and skipped.
+fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<DeleteOutcome> {
+    let mut outcome = DeleteOutcome::default();
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let p = entry.path();
 
         if !safelist.is_safe_user_path(&p) {
-            skipped_protected += 1;
+            outcome.skipped_protected += 1;
             continue;
         }
 
         let meta = std::fs::symlink_metadata(&p)?;
         if meta.is_dir() && !meta.is_symlink() {
-            skipped_protected += remove_dir_contents(&p, safelist)?;
+            let nested = remove_dir_contents(&p, safelist)?;
+            outcome.freed_bytes += nested.freed_bytes;
+            outcome.skipped_protected += nested.skipped_protected;
             match std::fs::remove_dir(&p) {
                 Ok(()) => {}
                 Err(e) if is_directory_not_empty(&e) => {}
@@ -141,10 +151,13 @@ fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<usize
                 Err(e) => return Err(e),
             }
         } else {
+            // Counts the symlink/file's own size — for symlinks this is the link
+            // itself, which is what we remove.
+            outcome.freed_bytes += meta.len();
             std::fs::remove_file(&p)?;
         }
     }
-    Ok(skipped_protected)
+    Ok(outcome)
 }
 
 fn is_directory_not_empty(err: &std::io::Error) -> bool {
@@ -296,8 +309,28 @@ mod tests {
 
         assert_eq!(rep.removed, 1);
         assert_eq!(rep.failures.len(), 1);
+        assert_eq!(rep.freed_bytes, 4, "only the 4-byte 'junk' file was freed");
         assert!(protected.join("secret").exists());
         assert!(!removable.exists());
+        assert!(cache.exists());
+    }
+
+    #[test]
+    fn fully_protected_dir_is_not_counted_as_removed() {
+        let home = tempfile::tempdir().unwrap();
+        let cache = home.path().join(".cache");
+        let protected = cache.join("keyring");
+        std::fs::create_dir_all(&protected).unwrap();
+        std::fs::write(protected.join("secret"), b"secret").unwrap();
+
+        let sl = Safelist::new(home.path(), vec![]);
+        let items = vec![item(cache.clone(), DeleteMode::Permanent)];
+        let rep = clean_items(&items, &sl, &CancelToken::new(), None);
+
+        assert_eq!(rep.removed, 0, "nothing was freed — only a protected path");
+        assert_eq!(rep.failures.len(), 1);
+        assert_eq!(rep.freed_bytes, 0);
+        assert!(protected.join("secret").exists());
         assert!(cache.exists());
     }
 }
