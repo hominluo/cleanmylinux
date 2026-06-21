@@ -201,6 +201,8 @@ dependencies = [
  "cxx-qt-lib",
  "dirs",
  "humansize",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

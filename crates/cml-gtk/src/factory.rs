@@ -60,7 +60,6 @@ impl FactoryComponent for ItemRow {
             selected: item.selected,
         }
     }
-
 }
 
 fn subtitle(size: &str, note: &Option<String>) -> String {

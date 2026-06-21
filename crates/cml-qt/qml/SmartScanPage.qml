@@ -10,6 +10,18 @@ Kirigami.ScrollablePage {
 
     // The shared Controller, injected from Main.qml.
     property var controllerRef
+    property var rows: parseRows()
+
+    function parseRows() {
+        if (!controllerRef || controllerRef.rows_json.length === 0) {
+            return []
+        }
+        try {
+            return JSON.parse(controllerRef.rows_json)
+        } catch (e) {
+            return []
+        }
+    }
 
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
@@ -38,7 +50,7 @@ Kirigami.ScrollablePage {
                 Controls.Button {
                     text: "Clean selected"
                     icon.name: "edit-clear-all"
-                    enabled: !(controllerRef && controllerRef.busy)
+                    enabled: controllerRef && !controllerRef.busy && controllerRef.has_selection
                     onClicked: cleanDialog.open()
                 }
             }
@@ -51,15 +63,72 @@ Kirigami.ScrollablePage {
             opacity: 0.7
         }
 
-        // Results — split the controller's detail string into list rows.
         Repeater {
-            model: controllerRef && controllerRef.detail.length > 0
-                   ? controllerRef.detail.split("\n") : []
+            model: page.rows
             delegate: Kirigami.AbstractCard {
                 Layout.fillWidth: true
-                contentItem: Controls.Label {
-                    text: modelData
-                    elide: Text.ElideRight
+
+                contentItem: RowLayout {
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Controls.CheckBox {
+                        checked: modelData.selected
+                        enabled: controllerRef && !controllerRef.busy
+                        onToggled: controllerRef.set_selected(index, checked)
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                text: modelData.label
+                                elide: Text.ElideRight
+                                font.bold: true
+                            }
+                            Controls.Label {
+                                text: modelData.size_text
+                                opacity: 0.72
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            Controls.Label {
+                                text: modelData.category
+                                opacity: 0.72
+                                elide: Text.ElideRight
+                            }
+                            Controls.Label {
+                                visible: modelData.safety !== "safe"
+                                text: modelData.safety === "risky" ? "Risky" : "Review"
+                                color: modelData.safety === "risky"
+                                       ? Kirigami.Theme.negativeTextColor
+                                       : Kirigami.Theme.neutralTextColor
+                            }
+                            Controls.Label {
+                                visible: modelData.delete_mode === "trash"
+                                text: "Trash"
+                                color: Kirigami.Theme.neutralTextColor
+                            }
+                            Controls.Label {
+                                visible: modelData.privileged
+                                text: "Privileged"
+                                color: Kirigami.Theme.neutralTextColor
+                            }
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                visible: modelData.note.length > 0
+                                text: modelData.note
+                                opacity: 0.72
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -68,7 +137,7 @@ Kirigami.ScrollablePage {
     Kirigami.PromptDialog {
         id: cleanDialog
         title: "Clean selected items?"
-        subtitle: "Pre-selected safe items will be removed. Files in 'Large & Old' are sent to Trash. Privileged actions will prompt for your password."
+        subtitle: controllerRef ? controllerRef.summary + ". Privileged actions may prompt for your password." : ""
         standardButtons: Controls.Dialog.Ok | Controls.Dialog.Cancel
         onAccepted: controllerRef.clean_safe()
     }

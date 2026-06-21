@@ -16,6 +16,14 @@ pub fn priv_marker(op: &str) -> PathBuf {
     PathBuf::from(format!("priv://{op}"))
 }
 
+const FLATPAK_UNUSED_DRY_RUN_ARGS: &[&str] = &[
+    "uninstall",
+    "--unused",
+    "--system",
+    "--noninteractive",
+    "--dry-run",
+];
+
 pub fn scan(cancel: &CancelToken, mut progress: Option<&mut Progress<'_>>) -> ScanResult {
     let mut result = ScanResult::default();
 
@@ -45,10 +53,7 @@ pub fn scan(cancel: &CancelToken, mut progress: Option<&mut Progress<'_>>) -> Sc
     // 2) Orphaned packages (apt-mark / autoremove candidates).
     report(&mut progress, Some(0.4), "Finding orphaned packages…");
     let auto = cmd::run_lenient("apt-get", &["-s", "autoremove"]);
-    let removable = auto
-        .lines()
-        .filter(|l| l.starts_with("Remv "))
-        .count();
+    let removable = auto.lines().filter(|l| l.starts_with("Remv ")).count();
     if removable > 0 {
         result.items.push(ScanItem {
             category: "Orphaned Packages".into(),
@@ -103,15 +108,31 @@ pub fn scan(cancel: &CancelToken, mut progress: Option<&mut Progress<'_>>) -> Sc
     // 5) Unused flatpak runtimes (user-removable, but listed here too).
     report(&mut progress, Some(0.95), "Checking flatpak runtimes…");
     if cmd::has("flatpak") {
-        let unused = cmd::run_lenient("flatpak", &["uninstall", "--unused", "--assumeyes", "--noninteractive"]);
-        // We don't actually run it here (assumeyes would); instead just probe the list.
-        let _ = unused;
-        let list = cmd::run_lenient("flatpak", &["list", "--runtime", "--columns=size"]);
-        let _ = list;
+        let unused = cmd::run_lenient("flatpak", FLATPAK_UNUSED_DRY_RUN_ARGS);
+        if flatpak_dry_run_has_unused(&unused) {
+            result.items.push(ScanItem {
+                category: "Flatpak Runtimes".into(),
+                label: "Unused system runtimes".into(),
+                path: priv_marker("flatpak_remove_unused"),
+                size: 0,
+                safety: Safety::Review,
+                delete_mode: DeleteMode::Permanent,
+                selected: false,
+                note: Some("Exact size is reported after cleanup".into()),
+            });
+        }
     }
 
     report(&mut progress, Some(1.0), "Scan complete");
     result
+}
+
+fn flatpak_dry_run_has_unused(out: &str) -> bool {
+    let normalized = out.trim().to_lowercase();
+    !normalized.is_empty()
+        && !normalized.contains("nothing unused")
+        && !normalized.contains("no unused")
+        && !normalized.contains("error")
 }
 
 /// Parse "After this operation, NNN MB disk space will be freed." from apt -s.
@@ -148,10 +169,7 @@ fn parse_apt_size(s: &str) -> u64 {
 fn parse_journal_usage(s: &str) -> Option<u64> {
     let idx = s.find("take up ")?;
     let rest = &s[idx + "take up ".len()..];
-    let token: String = rest
-        .chars()
-        .take_while(|c| !c.is_whitespace())
-        .collect();
+    let token: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
     parse_iec_size(&token)
 }
 
@@ -177,7 +195,9 @@ fn count_removable_kernels() -> usize {
     let list = cmd::run_lenient("dpkg-query", &["-W", "-f=${Package}\n", "linux-image-*"]);
     list.lines()
         .filter(|pkg| {
-            pkg.starts_with("linux-image-") && !pkg.contains(running) && pkg.chars().any(|c| c.is_ascii_digit())
+            pkg.starts_with("linux-image-")
+                && !pkg.contains(running)
+                && pkg.chars().any(|c| c.is_ascii_digit())
         })
         .count()
         .saturating_sub(1) // keep newest as well
@@ -197,11 +217,34 @@ mod tests {
     #[test]
     fn parses_journal_usage_line() {
         let s = "Archived and active journals take up 1.2G in the file system.";
-        assert_eq!(parse_journal_usage(s), Some((1.2 * (1u64 << 30) as f64) as u64));
+        assert_eq!(
+            parse_journal_usage(s),
+            Some((1.2 * (1u64 << 30) as f64) as u64)
+        );
     }
 
     #[test]
     fn priv_marker_roundtrip() {
-        assert_eq!(priv_marker("apt_clean").to_string_lossy(), "priv://apt_clean");
+        assert_eq!(
+            priv_marker("apt_clean").to_string_lossy(),
+            "priv://apt_clean"
+        );
+    }
+
+    #[test]
+    fn flatpak_probe_is_dry_run_only() {
+        assert!(FLATPAK_UNUSED_DRY_RUN_ARGS.contains(&"--dry-run"));
+        assert!(FLATPAK_UNUSED_DRY_RUN_ARGS.contains(&"--noninteractive"));
+        assert!(!FLATPAK_UNUSED_DRY_RUN_ARGS.contains(&"--assumeyes"));
+        assert!(!FLATPAK_UNUSED_DRY_RUN_ARGS.contains(&"-y"));
+    }
+
+    #[test]
+    fn parses_flatpak_unused_probe() {
+        assert!(!flatpak_dry_run_has_unused(""));
+        assert!(!flatpak_dry_run_has_unused("Nothing unused to uninstall"));
+        assert!(flatpak_dry_run_has_unused(
+            "Would uninstall:\norg.example.Runtime"
+        ));
     }
 }

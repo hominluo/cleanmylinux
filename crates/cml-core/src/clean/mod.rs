@@ -4,14 +4,21 @@
 //! Defense in depth: even though scanners already exclude protected paths, every
 //! deletion is re-checked against the [`Safelist`] right before it happens.
 
-use crate::fsutil::dir_size;
+use crate::fsutil::{dir_size, entry_disk_usage};
 use crate::helper_ipc::{HelperOp, HelperRequest, HelperResponse};
 use crate::progress::{report, CancelToken, Progress};
 use crate::safety::Safelist;
 use crate::types::{CleanReport, DeleteMode, ScanItem};
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+
+#[derive(Debug, Default)]
+struct DeleteOutcome {
+    freed_bytes: u64,
+    skipped_protected: usize,
+}
 
 /// Clean the selected user-space items. Privileged items (those whose path uses
 /// the `priv://` marker) are skipped here — route them through
@@ -49,10 +56,24 @@ pub fn clean_items(
             continue;
         }
 
-        match delete_one(&item.path, item.delete_mode, cancel) {
-            Ok(freed) => {
-                report_out.freed_bytes += freed;
-                report_out.removed += 1;
+        match delete_one(&item.path, item.delete_mode, safelist, cancel) {
+            Ok(outcome) => {
+                report_out.freed_bytes += outcome.freed_bytes;
+                if outcome.skipped_protected > 0 {
+                    report_out.failures.push((
+                        item.path.clone(),
+                        format!(
+                            "skipped {} protected nested path(s)",
+                            outcome.skipped_protected
+                        ),
+                    ));
+                }
+                // Count as removed when something was actually freed, or the item
+                // was cleanly emptied. A fully-skipped item (nothing freed, only
+                // protected descendants left behind) is reported as a failure only.
+                if outcome.freed_bytes > 0 || outcome.skipped_protected == 0 {
+                    report_out.removed += 1;
+                }
             }
             Err(e) => report_out.failures.push((item.path.clone(), e.to_string())),
         }
@@ -62,44 +83,97 @@ pub fn clean_items(
     report_out
 }
 
-fn delete_one(path: &Path, mode: DeleteMode, cancel: &CancelToken) -> anyhow::Result<u64> {
+fn delete_one(
+    path: &Path,
+    mode: DeleteMode,
+    safelist: &Safelist,
+    cancel: &CancelToken,
+) -> anyhow::Result<DeleteOutcome> {
     if !path.exists() {
-        return Ok(0);
+        return Ok(DeleteOutcome::default());
     }
-    // Measure before removing so we can report freed bytes.
-    let size = dir_size(path, cancel);
 
     match mode {
         DeleteMode::Trash => {
+            // Trashing moves the path away, so we can't measure afterwards —
+            // size it up front.
+            let before = dir_size(path, cancel);
             trash::delete(path)?;
+            Ok(DeleteOutcome {
+                freed_bytes: before,
+                skipped_protected: 0,
+            })
         }
         DeleteMode::Permanent => {
             let meta = std::fs::symlink_metadata(path)?;
             if meta.is_dir() {
                 // Remove directory *contents* but keep the well-known dir itself
                 // (e.g. ~/.cache should continue to exist).
-                remove_dir_contents(path)?;
+                Ok(remove_dir_contents(path, safelist)?)
             } else {
+                let mut seen = HashSet::new();
+                let freed = entry_disk_usage(&meta, &mut seen);
                 std::fs::remove_file(path)?;
+                Ok(DeleteOutcome {
+                    freed_bytes: freed,
+                    skipped_protected: 0,
+                })
             }
         }
     }
-    Ok(size)
 }
 
-/// Remove everything inside `dir` but leave `dir` in place.
-fn remove_dir_contents(dir: &Path) -> std::io::Result<()> {
+/// Remove everything inside `dir` but leave `dir` in place, tallying the bytes
+/// actually freed and the number of protected descendants left untouched.
+///
+/// Every entry is re-checked against the [`Safelist`], which requires it to live
+/// under `$HOME`. Callers must therefore only pass user-space directories; a
+/// `DeleteMode::Permanent` directory located outside `$HOME` would have all of
+/// its contents treated as protected and skipped.
+fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<DeleteOutcome> {
+    let mut seen_inodes = HashSet::new();
+    remove_dir_contents_inner(dir, safelist, &mut seen_inodes)
+}
+
+fn remove_dir_contents_inner(
+    dir: &Path,
+    safelist: &Safelist,
+    seen_inodes: &mut HashSet<(u64, u64)>,
+) -> std::io::Result<DeleteOutcome> {
+    let mut outcome = DeleteOutcome::default();
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let p = entry.path();
+
+        if !safelist.is_safe_user_path(&p) {
+            outcome.skipped_protected += 1;
+            continue;
+        }
+
         let meta = std::fs::symlink_metadata(&p)?;
         if meta.is_dir() && !meta.is_symlink() {
-            std::fs::remove_dir_all(&p)?;
+            let nested = remove_dir_contents_inner(&p, safelist, seen_inodes)?;
+            outcome.freed_bytes += nested.freed_bytes;
+            outcome.skipped_protected += nested.skipped_protected;
+            match std::fs::remove_dir(&p) {
+                Ok(()) => {}
+                Err(e) if is_directory_not_empty(&e) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         } else {
+            // Tally real on-disk usage (blocks × 512), matching the scan's
+            // convention: symlinks count as zero, hardlinks once. Then remove.
+            outcome.freed_bytes += entry_disk_usage(&meta, seen_inodes);
             std::fs::remove_file(&p)?;
         }
     }
-    Ok(())
+    Ok(outcome)
+}
+
+fn is_directory_not_empty(err: &std::io::Error) -> bool {
+    // Rust 1.80 does not have ErrorKind::DirectoryNotEmpty yet.
+    matches!(err.raw_os_error(), Some(39) | Some(66))
 }
 
 fn is_priv_marker(path: &Path) -> bool {
@@ -227,5 +301,56 @@ mod tests {
         let rep = clean_items(&items, &sl, &CancelToken::new(), None);
         assert_eq!(rep.removed, 0);
         assert_eq!(rep.failures.len(), 0);
+    }
+
+    #[test]
+    fn recursive_delete_skips_protected_descendants() {
+        let home = tempfile::tempdir().unwrap();
+        let cache = home.path().join(".cache");
+        let protected = cache.join("keyring");
+        let removable = cache.join("app");
+        std::fs::create_dir_all(&protected).unwrap();
+        std::fs::create_dir_all(&removable).unwrap();
+        std::fs::write(protected.join("secret"), b"secret").unwrap();
+        std::fs::write(removable.join("junk"), b"junk").unwrap();
+
+        // Expected freed bytes = on-disk usage of the removable subtree, using
+        // the same convention the scan reports (blocks × 512), so the figures
+        // line up for the user.
+        let expected_freed = dir_size(&removable, &CancelToken::new());
+
+        let sl = Safelist::new(home.path(), vec![]);
+        let items = vec![item(cache.clone(), DeleteMode::Permanent)];
+        let rep = clean_items(&items, &sl, &CancelToken::new(), None);
+
+        assert_eq!(rep.removed, 1);
+        assert_eq!(rep.failures.len(), 1);
+        assert_eq!(rep.freed_bytes, expected_freed);
+        assert!(
+            rep.freed_bytes > 0,
+            "the removable file occupied real blocks"
+        );
+        assert!(protected.join("secret").exists());
+        assert!(!removable.exists());
+        assert!(cache.exists());
+    }
+
+    #[test]
+    fn fully_protected_dir_is_not_counted_as_removed() {
+        let home = tempfile::tempdir().unwrap();
+        let cache = home.path().join(".cache");
+        let protected = cache.join("keyring");
+        std::fs::create_dir_all(&protected).unwrap();
+        std::fs::write(protected.join("secret"), b"secret").unwrap();
+
+        let sl = Safelist::new(home.path(), vec![]);
+        let items = vec![item(cache.clone(), DeleteMode::Permanent)];
+        let rep = clean_items(&items, &sl, &CancelToken::new(), None);
+
+        assert_eq!(rep.removed, 0, "nothing was freed — only a protected path");
+        assert_eq!(rep.failures.len(), 1);
+        assert_eq!(rep.freed_bytes, 0);
+        assert!(protected.join("secret").exists());
+        assert!(cache.exists());
     }
 }

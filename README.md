@@ -4,7 +4,7 @@
 
 **A native Linux system-cleanup app with a CleanMyMac-style experience — for both GNOME and KDE.**
 
-Smart Scan · System Junk · Package Cleanup · Large & Old Files · App Uninstaller · System Monitor
+Smart Scan · System Junk · Package Cleanup · Large & Old Files · System Monitor
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange)
@@ -25,7 +25,6 @@ toolkits** so it feels at home on your desktop, not bolted on.
 - 🗑️ **System Junk** — user & app caches, thumbnails, Trash, old logs, browser caches.
 - 📦 **Package Cleanup** — apt cache, orphaned packages, old kernels, snap revisions, unused flatpak runtimes.
 - 📁 **Large & Old Files** — find space hogs across your home folder; recoverable via Trash.
-- 🧩 **App Uninstaller** — remove apt / flatpak / snap apps cleanly.
 - 📊 **System Monitor** — live CPU, RAM, swap and disk usage.
 
 ## Native on both GNOME *and* KDE
@@ -101,7 +100,7 @@ Working v0.1 — both frontends run and share the `cml-core` engine:
 - ✅ `.deb` packaging (`cleanmylinux-common`, `-gnome`, `-kde`)
 
 Roadmap: grouped/sectioned result lists, exclusions & settings UI, scheduled
-cleanup, i18n, CI, and visual polish per desktop. Contributions welcome.
+cleanup, safe app uninstall, i18n, CI, and visual polish per desktop. Contributions welcome.
 
 ## License
 

@@ -103,7 +103,11 @@ impl ScanResult {
     }
 
     pub fn selected_size(&self) -> u64 {
-        self.items.iter().filter(|i| i.selected).map(|i| i.size).sum()
+        self.items
+            .iter()
+            .filter(|i| i.selected)
+            .map(|i| i.size)
+            .sum()
     }
 
     pub fn human_total(&self) -> String {

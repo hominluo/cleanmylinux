@@ -83,7 +83,7 @@ pub fn scan(
     }
 
     // Biggest first.
-    result.items.sort_by(|a, b| b.size.cmp(&a.size));
+    result.items.sort_by_key(|i| std::cmp::Reverse(i.size));
     report(&mut progress, Some(1.0), "Scan complete");
     result
 }

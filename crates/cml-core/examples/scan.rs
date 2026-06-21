@@ -22,10 +22,16 @@ fn main() {
     }
     println!("\n-- by category --");
     for (cat, size) in &by_cat {
-        println!("  {cat:<20} {}", humansize::format_size(*size, humansize::DECIMAL));
+        println!(
+            "  {cat:<20} {}",
+            humansize::format_size(*size, humansize::DECIMAL)
+        );
     }
     println!("\nTOTAL reclaimable: {}", res.human_total());
-    println!("Pre-selected:      {}", humansize::format_size(res.selected_size(), humansize::DECIMAL));
+    println!(
+        "Pre-selected:      {}",
+        humansize::format_size(res.selected_size(), humansize::DECIMAL)
+    );
 }
 
 fn truncate(s: &str, n: usize) -> String {
