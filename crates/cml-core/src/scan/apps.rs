@@ -27,7 +27,7 @@ pub fn inventory() -> Vec<InstalledApp> {
     apps.extend(apt_apps());
     apps.extend(flatpak_apps());
     apps.extend(snap_apps());
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps
 }
 

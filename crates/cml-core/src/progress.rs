@@ -40,7 +40,11 @@ pub struct ProgressUpdate {
 pub type Progress<'a> = dyn FnMut(ProgressUpdate) + Send + 'a;
 
 /// Convenience to emit a progress update through an optional callback.
-pub fn report(cb: &mut Option<&mut Progress<'_>>, fraction: Option<f64>, message: impl Into<String>) {
+pub fn report(
+    cb: &mut Option<&mut Progress<'_>>,
+    fraction: Option<f64>,
+    message: impl Into<String>,
+) {
     if let Some(cb) = cb.as_mut() {
         cb(ProgressUpdate {
             fraction,

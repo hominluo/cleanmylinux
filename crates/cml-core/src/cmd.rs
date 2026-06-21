@@ -36,6 +36,17 @@ pub fn run_lenient(program: &str, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// Run a command and return only whether it exited successfully.
+pub fn status_success(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .env("PATH", SYS_PATH)
+        .env("LC_ALL", "C")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Whether a program is resolvable on the system PATH.
 pub fn has(program: &str) -> bool {
     Command::new("sh")

@@ -13,6 +13,12 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+#[derive(Debug, Default)]
+struct DeleteOutcome {
+    freed_bytes: u64,
+    skipped_protected: usize,
+}
+
 /// Clean the selected user-space items. Privileged items (those whose path uses
 /// the `priv://` marker) are skipped here — route them through
 /// [`run_privileged`] instead. Reports per-item failures without aborting.
@@ -49,10 +55,19 @@ pub fn clean_items(
             continue;
         }
 
-        match delete_one(&item.path, item.delete_mode, cancel) {
-            Ok(freed) => {
-                report_out.freed_bytes += freed;
+        match delete_one(&item.path, item.delete_mode, safelist, cancel) {
+            Ok(outcome) => {
+                report_out.freed_bytes += outcome.freed_bytes;
                 report_out.removed += 1;
+                if outcome.skipped_protected > 0 {
+                    report_out.failures.push((
+                        item.path.clone(),
+                        format!(
+                            "skipped {} protected nested path(s)",
+                            outcome.skipped_protected
+                        ),
+                    ));
+                }
             }
             Err(e) => report_out.failures.push((item.path.clone(), e.to_string())),
         }
@@ -62,44 +77,79 @@ pub fn clean_items(
     report_out
 }
 
-fn delete_one(path: &Path, mode: DeleteMode, cancel: &CancelToken) -> anyhow::Result<u64> {
+fn delete_one(
+    path: &Path,
+    mode: DeleteMode,
+    safelist: &Safelist,
+    cancel: &CancelToken,
+) -> anyhow::Result<DeleteOutcome> {
     if !path.exists() {
-        return Ok(0);
+        return Ok(DeleteOutcome::default());
     }
     // Measure before removing so we can report freed bytes.
-    let size = dir_size(path, cancel);
+    let before = dir_size(path, cancel);
 
     match mode {
         DeleteMode::Trash => {
             trash::delete(path)?;
+            Ok(DeleteOutcome {
+                freed_bytes: before,
+                skipped_protected: 0,
+            })
         }
         DeleteMode::Permanent => {
             let meta = std::fs::symlink_metadata(path)?;
             if meta.is_dir() {
                 // Remove directory *contents* but keep the well-known dir itself
                 // (e.g. ~/.cache should continue to exist).
-                remove_dir_contents(path)?;
+                let skipped_protected = remove_dir_contents(path, safelist)?;
+                let after = dir_size(path, cancel);
+                Ok(DeleteOutcome {
+                    freed_bytes: before.saturating_sub(after),
+                    skipped_protected,
+                })
             } else {
                 std::fs::remove_file(path)?;
+                Ok(DeleteOutcome {
+                    freed_bytes: before,
+                    skipped_protected: 0,
+                })
             }
         }
     }
-    Ok(size)
 }
 
 /// Remove everything inside `dir` but leave `dir` in place.
-fn remove_dir_contents(dir: &Path) -> std::io::Result<()> {
+fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<usize> {
+    let mut skipped_protected = 0;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let p = entry.path();
+
+        if !safelist.is_safe_user_path(&p) {
+            skipped_protected += 1;
+            continue;
+        }
+
         let meta = std::fs::symlink_metadata(&p)?;
         if meta.is_dir() && !meta.is_symlink() {
-            std::fs::remove_dir_all(&p)?;
+            skipped_protected += remove_dir_contents(&p, safelist)?;
+            match std::fs::remove_dir(&p) {
+                Ok(()) => {}
+                Err(e) if is_directory_not_empty(&e) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         } else {
             std::fs::remove_file(&p)?;
         }
     }
-    Ok(())
+    Ok(skipped_protected)
+}
+
+fn is_directory_not_empty(err: &std::io::Error) -> bool {
+    // Rust 1.80 does not have ErrorKind::DirectoryNotEmpty yet.
+    matches!(err.raw_os_error(), Some(39) | Some(66))
 }
 
 fn is_priv_marker(path: &Path) -> bool {
@@ -227,5 +277,27 @@ mod tests {
         let rep = clean_items(&items, &sl, &CancelToken::new(), None);
         assert_eq!(rep.removed, 0);
         assert_eq!(rep.failures.len(), 0);
+    }
+
+    #[test]
+    fn recursive_delete_skips_protected_descendants() {
+        let home = tempfile::tempdir().unwrap();
+        let cache = home.path().join(".cache");
+        let protected = cache.join("keyring");
+        let removable = cache.join("app");
+        std::fs::create_dir_all(&protected).unwrap();
+        std::fs::create_dir_all(&removable).unwrap();
+        std::fs::write(protected.join("secret"), b"secret").unwrap();
+        std::fs::write(removable.join("junk"), b"junk").unwrap();
+
+        let sl = Safelist::new(home.path(), vec![]);
+        let items = vec![item(cache.clone(), DeleteMode::Permanent)];
+        let rep = clean_items(&items, &sl, &CancelToken::new(), None);
+
+        assert_eq!(rep.removed, 1);
+        assert_eq!(rep.failures.len(), 1);
+        assert!(protected.join("secret").exists());
+        assert!(!removable.exists());
+        assert!(cache.exists());
     }
 }

@@ -12,6 +12,7 @@
 
 use cml_core::cmd;
 use cml_core::helper_ipc::{HelperOp, HelperRequest, HelperResponse, PrivilegedTarget};
+use std::cmp::Ordering;
 use std::io::{Read, Write};
 
 fn main() {
@@ -82,6 +83,9 @@ fn apt_clean(dry: bool) -> HelperResponse {
     if dry {
         return HelperResponse::ok(before, "would clean apt cache");
     }
+    if let Some(resp) = refuse_if_dpkg_locked() {
+        return resp;
+    }
     match cmd::run("apt-get", &["clean"]) {
         Ok(_) => {
             let after = dir_size("/var/cache/apt/archives");
@@ -94,7 +98,16 @@ fn apt_clean(dry: bool) -> HelperResponse {
 fn apt_autoremove(dry: bool) -> HelperResponse {
     if dry {
         let sim = cmd::run_lenient("apt-get", &["-s", "autoremove"]);
-        return HelperResponse::ok(0, format!("dry run:\n{}", sim.lines().take(5).collect::<Vec<_>>().join("\n")));
+        return HelperResponse::ok(
+            0,
+            format!(
+                "dry run:\n{}",
+                sim.lines().take(5).collect::<Vec<_>>().join("\n")
+            ),
+        );
+    }
+    if let Some(resp) = refuse_if_dpkg_locked() {
+        return resp;
     }
     match cmd::run("apt-get", &["autoremove", "--purge", "-y"]) {
         Ok(out) => HelperResponse::ok(0, out.lines().last().unwrap_or("done").to_string()),
@@ -106,16 +119,25 @@ fn apt_autoremove(dry: bool) -> HelperResponse {
 /// newest. The candidate list is computed here; callers cannot name packages.
 fn prune_kernels(keep: u32, dry: bool) -> HelperResponse {
     let running = cmd::run_lenient("uname", &["-r"]).trim().to_string();
-    let list = cmd::run_lenient("dpkg-query", &["-W", "-f=${Package}\n", "linux-image-*"]);
+    let list = cmd::run_lenient(
+        "dpkg-query",
+        &["-W", "-f=${Package}\t${Version}\n", "linux-image-*"],
+    );
 
-    let mut versioned: Vec<String> = list
+    let mut versioned: Vec<KernelPackage> = list
         .lines()
-        .filter(|p| p.starts_with("linux-image-") && p.chars().any(|c| c.is_ascii_digit()))
-        .map(|s| s.to_string())
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            let name = fields.next()?.to_string();
+            let version = fields.next().unwrap_or("").to_string();
+            if name.starts_with("linux-image-") && name.chars().any(|c| c.is_ascii_digit()) {
+                Some(KernelPackage { name, version })
+            } else {
+                None
+            }
+        })
         .collect();
-    // Sort so newest sorts last (dpkg version ordering is approximated lexically;
-    // good enough since we additionally never touch the running kernel).
-    versioned.sort();
+    versioned.sort_by(compare_kernel_packages);
 
     let keep_newest = keep.max(1) as usize;
     let mut candidates: Vec<String> = Vec::new();
@@ -127,7 +149,7 @@ fn prune_kernels(keep: u32, dry: bool) -> HelperResponse {
         if pkg.contains(&running) {
             continue; // never the running kernel
         }
-        candidates.push(pkg.clone());
+        candidates.push(pkg.name.clone());
     }
 
     if candidates.is_empty() {
@@ -136,6 +158,9 @@ fn prune_kernels(keep: u32, dry: bool) -> HelperResponse {
     if dry {
         return HelperResponse::ok(0, format!("would remove: {}", candidates.join(", ")));
     }
+    if let Some(resp) = refuse_if_dpkg_locked() {
+        return resp;
+    }
 
     let mut args = vec!["purge", "-y"];
     let refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
@@ -143,6 +168,44 @@ fn prune_kernels(keep: u32, dry: bool) -> HelperResponse {
     match cmd::run("apt-get", &args) {
         Ok(_) => HelperResponse::ok(0, format!("removed {} kernel package(s)", candidates.len())),
         Err(e) => HelperResponse::err(e.to_string()),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct KernelPackage {
+    name: String,
+    version: String,
+}
+
+impl KernelPackage {
+    fn contains(&self, needle: &str) -> bool {
+        self.name.contains(needle) || self.version.contains(needle)
+    }
+}
+
+fn compare_kernel_packages(a: &KernelPackage, b: &KernelPackage) -> Ordering {
+    if cmd::status_success(
+        "dpkg",
+        &["--compare-versions", &a.version, "lt", &b.version],
+    ) {
+        Ordering::Less
+    } else if cmd::status_success(
+        "dpkg",
+        &["--compare-versions", &a.version, "gt", &b.version],
+    ) {
+        Ordering::Greater
+    } else {
+        a.name.cmp(&b.name)
+    }
+}
+
+fn refuse_if_dpkg_locked() -> Option<HelperResponse> {
+    if cml_core::process::dpkg_locked() {
+        Some(HelperResponse::err(
+            "package manager is busy; try again after apt/dpkg finishes",
+        ))
+    } else {
+        None
     }
 }
 
@@ -180,7 +243,10 @@ fn prune_snap(dry: bool) -> HelperResponse {
         return HelperResponse::ok(0, "no old snap revisions");
     }
     if dry {
-        return HelperResponse::ok(0, format!("would remove {} old snap revision(s)", disabled.len()));
+        return HelperResponse::ok(
+            0,
+            format!("would remove {} old snap revision(s)", disabled.len()),
+        );
     }
     let mut removed = 0;
     for (name, rev) in &disabled {
@@ -196,10 +262,28 @@ fn flatpak_unused(dry: bool) -> HelperResponse {
         return HelperResponse::ok(0, "flatpak not installed");
     }
     if dry {
-        let out = cmd::run_lenient("flatpak", &["uninstall", "--unused", "--system", "--noninteractive", "--dry-run"]);
+        let out = cmd::run_lenient(
+            "flatpak",
+            &[
+                "uninstall",
+                "--unused",
+                "--system",
+                "--noninteractive",
+                "--dry-run",
+            ],
+        );
         return HelperResponse::ok(0, format!("dry run:\n{}", out.trim()));
     }
-    match cmd::run("flatpak", &["uninstall", "--unused", "--system", "--assumeyes", "--noninteractive"]) {
+    match cmd::run(
+        "flatpak",
+        &[
+            "uninstall",
+            "--unused",
+            "--system",
+            "--assumeyes",
+            "--noninteractive",
+        ],
+    ) {
         Ok(out) => HelperResponse::ok(0, out.lines().last().unwrap_or("done").to_string()),
         Err(e) => HelperResponse::err(e.to_string()),
     }
@@ -222,7 +306,10 @@ fn estimate(what: PrivilegedTarget) -> HelperResponse {
 }
 
 fn dir_size(path: &str) -> u64 {
-    cml_core::fsutil::dir_size(std::path::Path::new(path), &cml_core::progress::CancelToken::new())
+    cml_core::fsutil::dir_size(
+        std::path::Path::new(path),
+        &cml_core::progress::CancelToken::new(),
+    )
 }
 
 fn parse_iec(tok: &str) -> u64 {
@@ -236,5 +323,8 @@ fn parse_iec(tok: &str) -> u64 {
     } else {
         (tok, 1)
     };
-    n.parse::<f64>().ok().map(|v| (v * m as f64) as u64).unwrap_or(0)
+    n.parse::<f64>()
+        .ok()
+        .map(|v| (v * m as f64) as u64)
+        .unwrap_or(0)
 }
