@@ -4,11 +4,12 @@
 //! Defense in depth: even though scanners already exclude protected paths, every
 //! deletion is re-checked against the [`Safelist`] right before it happens.
 
-use crate::fsutil::dir_size;
+use crate::fsutil::{dir_size, entry_disk_usage};
 use crate::helper_ipc::{HelperOp, HelperRequest, HelperResponse};
 use crate::progress::{report, CancelToken, Progress};
 use crate::safety::Safelist;
 use crate::types::{CleanReport, DeleteMode, ScanItem};
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -110,7 +111,8 @@ fn delete_one(
                 // (e.g. ~/.cache should continue to exist).
                 Ok(remove_dir_contents(path, safelist)?)
             } else {
-                let freed = meta.len();
+                let mut seen = HashSet::new();
+                let freed = entry_disk_usage(&meta, &mut seen);
                 std::fs::remove_file(path)?;
                 Ok(DeleteOutcome {
                     freed_bytes: freed,
@@ -129,6 +131,15 @@ fn delete_one(
 /// `DeleteMode::Permanent` directory located outside `$HOME` would have all of
 /// its contents treated as protected and skipped.
 fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<DeleteOutcome> {
+    let mut seen_inodes = HashSet::new();
+    remove_dir_contents_inner(dir, safelist, &mut seen_inodes)
+}
+
+fn remove_dir_contents_inner(
+    dir: &Path,
+    safelist: &Safelist,
+    seen_inodes: &mut HashSet<(u64, u64)>,
+) -> std::io::Result<DeleteOutcome> {
     let mut outcome = DeleteOutcome::default();
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -141,7 +152,7 @@ fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<Delet
 
         let meta = std::fs::symlink_metadata(&p)?;
         if meta.is_dir() && !meta.is_symlink() {
-            let nested = remove_dir_contents(&p, safelist)?;
+            let nested = remove_dir_contents_inner(&p, safelist, seen_inodes)?;
             outcome.freed_bytes += nested.freed_bytes;
             outcome.skipped_protected += nested.skipped_protected;
             match std::fs::remove_dir(&p) {
@@ -151,9 +162,9 @@ fn remove_dir_contents(dir: &Path, safelist: &Safelist) -> std::io::Result<Delet
                 Err(e) => return Err(e),
             }
         } else {
-            // Counts the symlink/file's own size — for symlinks this is the link
-            // itself, which is what we remove.
-            outcome.freed_bytes += meta.len();
+            // Tally real on-disk usage (blocks × 512), matching the scan's
+            // convention: symlinks count as zero, hardlinks once. Then remove.
+            outcome.freed_bytes += entry_disk_usage(&meta, seen_inodes);
             std::fs::remove_file(&p)?;
         }
     }
@@ -303,13 +314,22 @@ mod tests {
         std::fs::write(protected.join("secret"), b"secret").unwrap();
         std::fs::write(removable.join("junk"), b"junk").unwrap();
 
+        // Expected freed bytes = on-disk usage of the removable subtree, using
+        // the same convention the scan reports (blocks × 512), so the figures
+        // line up for the user.
+        let expected_freed = dir_size(&removable, &CancelToken::new());
+
         let sl = Safelist::new(home.path(), vec![]);
         let items = vec![item(cache.clone(), DeleteMode::Permanent)];
         let rep = clean_items(&items, &sl, &CancelToken::new(), None);
 
         assert_eq!(rep.removed, 1);
         assert_eq!(rep.failures.len(), 1);
-        assert_eq!(rep.freed_bytes, 4, "only the 4-byte 'junk' file was freed");
+        assert_eq!(rep.freed_bytes, expected_freed);
+        assert!(
+            rep.freed_bytes > 0,
+            "the removable file occupied real blocks"
+        );
         assert!(protected.join("secret").exists());
         assert!(!removable.exists());
         assert!(cache.exists());
