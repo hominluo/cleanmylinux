@@ -328,3 +328,40 @@ fn parse_iec(tok: &str) -> u64 {
         .map(|v| (v * m as f64) as u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kp(name: &str, version: &str) -> KernelPackage {
+        KernelPackage {
+            name: name.into(),
+            version: version.into(),
+        }
+    }
+
+    #[test]
+    fn kernel_packages_sort_oldest_to_newest_by_version() {
+        // dpkg version ordering — not lexical: 6.0.0-10 > 6.0.0-9.
+        if !cmd::has("dpkg") {
+            eprintln!("skipping: dpkg not available");
+            return;
+        }
+        let mut pkgs = [
+            kp("linux-image-6.0.0-10-generic", "6.0.0-10"),
+            kp("linux-image-6.0.0-9-generic", "6.0.0-9"),
+            kp("linux-image-5.15.0-2-generic", "5.15.0-2"),
+        ];
+        pkgs.sort_by(compare_kernel_packages);
+        let order: Vec<&str> = pkgs.iter().map(|p| p.version.as_str()).collect();
+        assert_eq!(order, ["5.15.0-2", "6.0.0-9", "6.0.0-10"]);
+    }
+
+    #[test]
+    fn kernel_package_contains_matches_name_or_version() {
+        let p = kp("linux-image-6.0.0-9-generic", "6.0.0-9");
+        assert!(p.contains("6.0.0-9-generic"));
+        assert!(p.contains("6.0.0-9"));
+        assert!(!p.contains("5.15.0-2"));
+    }
+}
